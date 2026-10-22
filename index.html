@@ -1137,12 +1137,13 @@ function capCalc(){
   const r=[];
   for(let s=0;s<4;s++){
     const done=s<S.ses||T6.some(t=>used(s,t)>0||(S.capF[s][t]!==undefined&&S.capF[s][t]!==null));
-    r[s]={done};
+    r[s]={done,filled:!!(S.capFill&&S.capFill[s])};
     T6.forEach(t=>{
       const base=+S.cap[s][t]||0;
-      const prev=(s>0&&r[s-1].done)?r[s-1][t].left:0;
-      const avail=Math.max(base,prev);
-      const hide=avail-prev;
+      const fl=S.capFill&&S.capFill[s];
+      let prev,hide,avail;
+      if(fl){prev=fl[t].prev;hide=fl[t].hide;avail=prev+hide}
+      else{prev=(s>0&&r[s-1].done)?r[s-1][t].left:0;avail=Math.max(base,prev);hide=avail-prev}
       const ov=S.capF[s][t];
       const auto=ov===undefined||ov===''||ov===null;
       const found=done?(auto?used(s,t):+ov):0;
@@ -1151,13 +1152,19 @@ function capCalc(){
   }
   return r;
 }
+function capDone(s,on){
+  if(!S.capFill)S.capFill={};
+  if(on){const r=capCalc();const o={};T6.forEach(t=>{o[t]={prev:r[s][t].prev,hide:r[s][t].hide}});S.capFill[s]=o;msg('✅ '+SES[s]+'부 캡슐 채우기 완료!\n숨긴 개수가 저장됐고, 이제부터 찾은 만큼 현장 남음이 줄어들어요.')}
+  else delete S.capFill[s];
+  save();draw();
+}
 function capLbl(t){return `${CAP_COL[t][0]} ${CAP_COL[t][1]}(${NM[t]})`}
 function capTxt(s,r){
   return `⏰ ${SES[s]}부 숨길 캡슐\n`+T6.map(t=>`${capLbl(t)} ${r[s][t].hide}개`).join('\n')+`\n합계 ${T6.reduce((n,t)=>n+r[s][t].hide,0)}개`;
 }
 function capAll(r){
   const o=[];
-  let nx=0;while(nx<3&&r[nx].done)nx++;
+  let nx=0;while(nx<3&&r[nx].filled)nx++;
   o.push(capTxt(nx,r));
   return o.join('\n\n');
 }
@@ -1175,9 +1182,10 @@ function vCap(){
     T6.map(t=>`<tr><td><b>${capLbl(t)}</b>`+[0,1,2,3].map(s=>`<td><input type="number" min="0" style="width:58px" value="${S.cap[s][t]}" onchange="S.cap[${s}][${t}]=+this.value;S.q[${s}][${t}]=+this.value;save();draw()">`).join('')+
     `<td>${[0,1,2,3].reduce((a,s)=>a+(+S.cap[s][t]||0),0)} / ${totCnt(t)}개</tr>`).join('')+`</table></div></div>`;
   for(let s=0;s<4;s++){
-    const tot=T6.reduce((a,t)=>a+r[s][t].hide,0);
-    h+=`<div class="card"><div class="row" style="justify-content:space-between"><b>⏰ ${SES[s]}부 · 숨길 캡슐 ${tot}개</b>
-      <button class="b sm gold" onclick="capCopy(capTxt(${s},window.__cr))">📋 ${SES[s]}부 숨길 개수 복사</button></div>
+    const tot=T6.reduce((a,t)=>a+r[s][t].hide,0),fd=r[s].filled;
+    h+=`<div class="card" ${fd?'style="border-color:#16a34a"':''}><div class="row" style="justify-content:space-between"><b>⏰ ${SES[s]}부 · ${fd?'✅ 숨긴 캡슐':'숨길 캡슐'} ${tot}개</b>
+      <span class="row"><button class="b sm gold" onclick="capCopy(capTxt(${s},window.__cr))">📋 복사</button>
+      ${fd?`<button class="b sm" onclick="capDone(${s},false)">↩ 완료 취소</button>`:`<button class="b sm go" onclick="capDone(${s},true)">✅ 채우기 완료</button>`}</span></div>
       <div style="overflow:auto"><table><tr><th>색깔·등수<th>배정<th>앞 부 남음<th>숨길 개수<th>찾음<th>못 찾음(남음)</tr>`+
       T6.map(t=>{const c=r[s][t];return `<tr><td><b>${capLbl(t)}</b><td>${c.base}개<td>${s>0&&r[s-1].done?c.prev+'개':'-'}<td><b style="color:#e11d48">${c.hide}개</b><td><input type="number" min="0" style="width:58px" placeholder="${used(s,t)}" value="${c.auto?'':c.found}" onchange="S.capF[${s}][${t}]=this.value===''?undefined:+this.value;save();draw()"><td>${!r[s].done?'-':c.left+'개'}</tr>`}).join('')+
       `</table></div></div>`;
