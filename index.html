@@ -466,6 +466,22 @@ function giveBack(o){
     if(S.items[o.tier][o.item])S.items[o.tier][o.item].got=false;
   }else S.rem[o.tier]++;
 }
+function snap(lbl){
+  S.undo=S.undo||[];
+  const g={};[1,2].forEach(t=>{if(S.items[t])g[t]=S.items[t].map(x=>!!x.got)});
+  S.undo.push({lbl,log:JSON.parse(JSON.stringify(S.log)),rem:JSON.parse(JSON.stringify(S.rem)),q:JSON.parse(JSON.stringify(S.q)),id:S.id,g});
+  if(S.undo.length>10)S.undo.shift();
+}
+function undoLast(){
+  const u=(S.undo||[])[S.undo.length-1];
+  if(!u)return msg('되돌릴 레이스 기록이 없어요');
+  ask('「'+u.lbl+'」 결과를 되돌릴까요?\n당첨 기록과 상품이 그 레이스 직전 상태로 돌아가요.',()=>{
+    S.undo.pop();
+    S.log=u.log;S.rem=u.rem;S.q=u.q;S.id=u.id;
+    Object.keys(u.g).forEach(t=>u.g[t].forEach((v,i)=>{if(S.items[t][i])S.items[t][i].got=v}));
+    save();draw();msg('↩️ 되돌렸어요!');
+  });
+}
 function give(n,t,it,s){
   let pName='',pImg='';
   if(t<3&&S.items[t][it]){
@@ -955,6 +971,7 @@ function goPk(){
   if(n>leftQ(t)){S.q[s][t]=used(s,t)+n}
   $('pk').style.display='none';pk=null;
   if(t>2){
+    snap(NM[t]+' 보물 '+ppl.join(', ').slice(0,20));
     ppl.forEach(p=>give(p,t,-1,s));
     save();draw();
     return show(ppl.map(p=>({name:p,tier:t,item:-1})),true);
@@ -963,6 +980,7 @@ function goPk(){
   // If all remaining prizes in this tier have the exact same name (1 single bundle), no need to race identical prizes unless user wants race excitement; still run the fun race so kids enjoy watching!
   // 구슬에는 경주하는 친구 이름이 적혀요. 도착하면 경품은 사진 릴로 랜덤 결정!
   run(ppl.map(x=>({label:x,key:x})),n,ppl.join(', ').slice(0,26)+' · '+NM[t]+' 경품 레이스!',w=>{
+    snap(NM[t]+' 경품 레이스 '+w.map(m=>m.key).join(', ').slice(0,20));
     const names=w.map(m=>m.key);
     const pickIt=shuf(its).slice(0,names.length);
     const res=pickIt.map((it,j)=>{give(names[j],t,it,s);return{name:names[j],tier:t,item:it}});
@@ -971,13 +989,22 @@ function goPk(){
   });
 }
 
-function startU(t,auto){
-  const ok=allNames().filter(n=>best(n)>t);
+function setBun(){
+  const a=$('bunin').value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean),have=new Set(allNames());
+  const bad=a.filter(x=>!have.has(x));
+  S.bun=[...new Set(a.filter(x=>have.has(x)))];
+  save();draw();
+  if(bad.length)msg('명단에 없는 이름은 뺐어요: '+bad.join(', '));
+}
+function startU(t,auto,bunOnly){
+  const B=S.bun||[];
+  const ok=allNames().filter(n=>best(n)>t&&(bunOnly?B.includes(n):!B.includes(n)));
   if(!rem(t))return msg(NM[t]+' 남은 상품이 없어요');
   if(!ok.length)return msg('참여할 수 있는 사람이 없어요');
   const k=Math.min(rem(t),ok.length);
   const launch=()=>{
-    run(ok.map(n=>({label:n,key:n})),k,'🏆 '+NM[t]+' 미당첨 역전 대레이스! (당첨 '+k+'명)',w=>{
+    run(ok.map(n=>({label:n,key:n})),k,'🏆 '+(bunOnly?'번외 ':'')+NM[t]+' 미당첨 역전 대레이스! (당첨 '+k+'명)',w=>{
+      snap((bunOnly?'번외 ':'')+NM[t]+' 미당첨 레이스');
       w.forEach(m=>{const o=S.log.find(l=>l.name==m.key&&!l.ret&&l.tier==best(m.key));if(o)giveBack(o)});
       const its=t<3?shuf(S.items[t].map((x,i)=>i).filter(i=>!S.items[t][i].got)):[];
       const res=w.map((m,j)=>{const it=t<3?its[j]:-1;give(m.key,t,it,-1);return{name:m.key,tier:t,item:it}});
@@ -985,13 +1012,35 @@ function startU(t,auto){
     });
   };
   if(auto)launch();
-  else ask(`${NM[t]} 미당첨 레이스를 시작할까요?\n\n• 참가 대상: ${ok.length}명\n• 당첨 인원: ${k}명`,launch);
+  else ask(`${bunOnly?'번외 ':''}${NM[t]} 미당첨 레이스를 시작할까요?\n\n• 참가 대상: ${ok.length}명\n• 당첨 인원: ${k}명`,launch);
 }
 
+function editWin(id){
+  const l=S.log.find(x=>x.id==id);if(!l)return;
+  const v=prompt('당첨자 이름을 바꿔요 (명단에 있는 이름)',l.name);
+  if(v===null)return;const n=v.trim();
+  if(!n||n==l.name)return;
+  if(!allNames().includes(n))return msg('명단에 없는 이름이에요: '+n);
+  snap('이름 수정 '+l.name+'→'+n);
+  l.name=n;save();draw();
+}
+function restoreWin(id){
+  const l=S.log.find(x=>x.id==id);if(!l||!l.ret)return;
+  if(l.tier<3){
+    const it=S.items[l.tier][l.item];
+    if(!it||it.got)return msg('그 상품은 이미 다른 사람에게 갔어요. 복구할 수 없어요');
+    snap('복구 '+l.name);it.got=true;
+  }else{
+    if(S.rem[l.tier]<=0)return msg('남은 상품이 없어서 복구할 수 없어요');
+    snap('복구 '+l.name);S.rem[l.tier]--;
+  }
+  l.ret=false;save();draw();
+}
 function cancel(id){
   const l=S.log.find(x=>x.id==id);
   if(!l)return;
   ask(l.name+' 당첨 기록을 지울까요?\n상품은 다시 남은 수량으로 돌아가요.',()=>{
+    snap('기록 삭제 '+l.name);
     if(!l.ret)giveBack(l);
     S.log=S.log.filter(x=>x.id!=id);
     save();draw();
@@ -1034,7 +1083,7 @@ function norm(){
   if((!S.roster||!S.roster.length)&&!S.rosterSet){S.roster=ROSTER_DEF.slice()}
   for(let s=0;s<4;s++){if(!S.q[s]||!T6.some(t=>+S.q[s][t]>0)){const nothing=!S.log.some(l=>l.ses==s);if(nothing)S.q[s]=Object.assign({},S.cap[s])}}
   if(JSON.stringify(S.cap)===CAP_OLD)S.cap=JSON.parse(JSON.stringify(CAP_DEF));
-  S.timg=S.timg||{};S.roster=S.roster||[];S.fr=S.fr||[];
+  S.timg=S.timg||{};S.roster=S.roster||[];S.fr=S.fr||[];S.bun=S.bun||[];
   // 기본 경품 사진 자동 적용 (아직 손대지 않은 등수만)
   [1,2].forEach(t=>{
     const a=S.items&&S.items[t];
@@ -1232,11 +1281,16 @@ function vUnc(){
   const all=allNames();
   return `<div class="card mut">💡 <b>미당첨 역전 레이스 안내:</b> 모든 수업이 끝난 뒤 남은 경품을 추첨할 때 쓰세요. 등수 카드를 누르면 <b>그 등수보다 낮은 등수이거나 아직 못 받은 친구들</b>이 전원 참가해 3D 대레이스를 펼칩니다! 더 높은 등수에 당첨되면 기존 하위 경품은 자동으로 반납되어 다른 친구에게 기회가 돌아가요.</div>
   <div class="card">
+    <p style="margin-top:0"><b>🚫 번외 명단</b> <span class="mut">(일반 미당첨 레이스에서 제외, 아래 번외 전용 레이스로만 참가)</span></p>
+    <div class="row"><input id="bunin" placeholder="번외 이름 (쉼표/줄바꿈 구분)" style="flex:1" value="${e((S.bun||[]).join(', '))}"><button class="b" onclick="setBun()">저장</button></div>
+    <div class="row">${T6.map(t=>`<button class="b" onclick="startU(${t},false,true)">번외 ${NM[t]} 레이스 (${all.filter(n=>(S.bun||[]).includes(n)&&best(n)>t).length}명)</button>`).join('')}</div>
+  </div>
+  <div class="card">
     <p style="margin-top:0">전체 참가 명단 <b>${all.length}명</b> <span class="mut">(정규 수련생 ${S.roster.length}명 · 놀러 온 친구 ${S.fr.length}명)</span></p>
     <div class="tier-grid">${T6.map(t=>`<button class="tier-btn tb-${t}" onclick="startU(${t})">
       <span class="t-badge">🏁 ${TIER_META[t].icon}</span>
       <span class="t-title">${NM[t]} 미당첨 레이스</span>
-      <span class="t-sub">남은 상품 ${rem(t)}개 · 참가 가능 ${all.filter(n=>best(n)>t).length}명</span>
+      <span class="t-sub">남은 상품 ${rem(t)}개 · 참가 가능 ${all.filter(n=>best(n)>t&&!(S.bun||[]).includes(n)).length}명</span>
     </button>`).join('')}</div>
   </div>`;
 }
@@ -1262,7 +1316,7 @@ function vRec(){
       `</div></div>`;
   });
 
-  h+=`<div class="card"><b>📜 전체 당첨 기록 (${S.log.filter(l=>!l.ret).length}건 유효)</b><table><tr><th>부<th>이름<th>당첨 상품<th>취소</tr>`+
+  h+=`<div class="card"><b>📜 전체 당첨 기록 (${S.log.filter(l=>!l.ret).length}건 유효)</b> <button class="b" onclick="undoLast()" ${(S.undo&&S.undo.length)?'':'disabled'}>↩️ 마지막 레이스 되돌리기${(S.undo&&S.undo.length)?' ('+e(S.undo[S.undo.length-1].lbl)+')':''}</button><p class="mut" style="margin:4px 0">이미 끝난 기록도 한 줄씩 고칠 수 있어요: ✕ 삭제(상품 반환) · ✏️ 이름 수정 · ↩️복구(반납된 기록 되살리기). 실수하면 위 되돌리기로 한 단계 취소돼요.</p><table><tr><th>부<th>이름<th>당첨 상품<th>관리</tr>`+
     (S.log.slice().reverse().map(l=>{
       const itemObj=l.tier<3?S.items[l.tier][l.item]:null;
       const pTitle=l.tier<3?(itemObj?itemObj.n:(l.pName||NM[l.tier]+' 상품')):'보물 당첨';
@@ -1270,7 +1324,7 @@ function vRec(){
         <td>${l.ses<0?'미당첨':SES[l.ses]+'부'}
         <td><b>${e(l.name)}</b>
         <td>${TIER_META[l.tier].icon} ${NM[l.tier]} · ${e(pTitle)}${l.ret?' (상위당첨 반납)':''}
-        <td><button class="b" style="padding:2px 8px;font-size:12px" onclick="cancel(${l.id})">✕</button>
+        <td><button class="b" style="padding:2px 8px;font-size:12px" onclick="cancel(${l.id})">✕</button> <button class="b" style="padding:2px 8px;font-size:12px" onclick="editWin(${l.id})">✏️</button>${l.ret?` <button class="b" style="padding:2px 8px;font-size:12px" onclick="restoreWin(${l.id})">↩️복구</button>`:''}
       </tr>`;
     }).join('')||'<tr><td colspan="4" class="mut">아직 당첨 기록이 없어요')+'</table></div>';
   return h;
