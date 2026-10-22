@@ -814,6 +814,64 @@ function renderResultCards(a){
   if(dn)setTimeout(closeRs,4200);
 }
 
+
+/* ===== 사진 릴(필름) 뽑기: 사진이 촤라락 돌다가 당첨 사진에서 멈춰요 ===== */
+function reelVis(t,it,i){return it.img?`<img src="${it.img}">`:prizeArt(t,it.n,i)}
+function reelRun(win,cb){
+  if(dn||!win.length)return cb();
+  const H=Math.min(260,Math.round(innerWidth*.62));
+  let k=0,stop=false,raf=0;
+  const next=()=>{
+    cancelAnimationFrame(raf);
+    if(k>=win.length)return cb();
+    const w=win[k],t=w.tier,items=S.items[t],tgt=items[w.item];
+    const pool=[];const seen=new Set();
+    items.forEach((it,i)=>{const key=it.img||it.n;if(!seen.has(key)){seen.add(key);pool.push({v:reelVis(t,it,i),n:it.n})}});
+    const fin={v:reelVis(t,tgt,w.item),n:tgt.n};
+    const N=46,strip=[];
+    let last=-1;
+    for(let i=0;i<N;i++){let j;do{j=Math.floor(Math.random()*pool.length)}while(pool.length>1&&j===last);last=j;strip.push(pool[j])}
+    strip.push(fin);
+    const meta=TIER_META[t];
+    $('rs').innerHTML=`<div class="rs-box rs-theme-${t}" style="text-align:center">
+      <div class="rs-badge">${meta.icon} ${NM[t]} 경품 뽑기 (${k+1}/${win.length})</div>
+      <h3 class="rs-title">🎰 ${e(w.name)} 님의 경품은?</h3>
+      <div id="reel" style="position:relative;width:${H}px;max-width:100%;height:${H}px;margin:10px auto;overflow:hidden;border-radius:14px;background:#111;border:4px solid ${meta.col};padding:0 18px;box-sizing:content-box">
+        <div style="position:absolute;left:0;top:0;bottom:0;width:18px;background:repeating-linear-gradient(#111 0 12px,#e8e8e8 12px 24px);opacity:.85"></div>
+        <div style="position:absolute;right:0;top:0;bottom:0;width:18px;background:repeating-linear-gradient(#111 0 12px,#e8e8e8 12px 24px);opacity:.85"></div>
+        <div id="rstrip" style="will-change:transform">${strip.map(x=>`<div style="width:${H}px;height:${H}px;display:flex;align-items:center;justify-content:center;overflow:hidden"><div style="width:${H}px;height:${H}px;overflow:hidden;filter:blur(0)">${x.v}</div></div>`).join('')}</div>
+        <div style="position:absolute;left:0;right:0;top:0;height:30%;background:linear-gradient(#000a,transparent);pointer-events:none"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:30%;background:linear-gradient(transparent,#000a);pointer-events:none"></div>
+      </div>
+      <div id="rname" class="res-prize-name" style="min-height:30px;font-weight:900;font-size:20px">🎞 ...</div>
+      <div class="row" style="justify-content:center;margin-top:10px"><button class="b" id="rskip">⏩ 바로 멈추기</button></div>
+    </div>`;
+    $('rs').style.display='flex';
+    const st=$('rstrip'),total=(strip.length-1)*H,T=4600,t0=performance.now();
+    let lastIdx=-1,done=false;
+    const ease=x=>1-Math.pow(1-x,3.4);
+    const land=()=>{
+      if(done)return;done=true;cancelAnimationFrame(raf);
+      st.style.transform=`translateY(${-total}px)`;st.style.filter='';
+      $('rname').textContent='🎁 '+fin.n;
+      try{fan(t<3?t:3);confetti(t)}catch(x){}
+      setTimeout(()=>{k++;next()},1700);
+    };
+    $('rskip').onclick=()=>{$('rskip').onclick=null;land()};
+    const loop=now=>{
+      if(done)return;
+      const x=Math.min(1,(now-t0)/T),pos=total*ease(x),idx=Math.floor(pos/H);
+      st.style.transform=`translateY(${-pos}px)`;
+      st.style.filter=x<.75?`blur(${Math.min(3,(1-x)*4)}px)`:'';
+      if(idx!==lastIdx){lastIdx=idx;snd(300+Math.min(700,idx*14),.04,'square',.04)}
+      if(x>=1)land();else raf=requestAnimationFrame(loop);
+    };
+    drumroll();
+    raf=requestAnimationFrame(loop);
+  };
+  next();
+}
+
 let chestTimer=null;
 function show(a,withChest=false){
   if(!a||!a.length)return;
@@ -904,9 +962,12 @@ function goPk(){
   }
   const its=S.items[t].map((x,i)=>i).filter(i=>!S.items[t][i].got);
   // If all remaining prizes in this tier have the exact same name (1 single bundle), no need to race identical prizes unless user wants race excitement; still run the fun race so kids enjoy watching!
-  run(its.map(i=>({label:S.items[t][i].n,key:i})),n,ppl.join(', ').slice(0,26)+' · '+NM[t]+' 경품 결정 레이스!',w=>{
-    const res=w.map((m,j)=>{give(ppl[j],t,m.key,s);return{name:ppl[j],tier:t,item:m.key}});
-    save();draw();show(res,false);
+  // 레이스 동안은 어떤 상품인지 모르게 '?' 구슬로 달리고, 도착한 뒤에 사진 릴로 랜덤 상품이 정해져요
+  run(its.map((i,k)=>({label:'❓'+(k+1),key:i})),n,ppl.join(', ').slice(0,26)+' · '+NM[t]+' 경품 결정 레이스!',w=>{
+    const pickIt=shuf(its).slice(0,Math.min(n,ppl.length));
+    const res=pickIt.map((it,j)=>{give(ppl[j],t,it,s);return{name:ppl[j],tier:t,item:it}});
+    save();draw();
+    reelRun(res,()=>show(res,false));
   });
 }
 
@@ -920,7 +981,7 @@ function startU(t,auto){
       w.forEach(m=>{const o=S.log.find(l=>l.name==m.key&&!l.ret&&l.tier==best(m.key));if(o)giveBack(o)});
       const its=t<3?shuf(S.items[t].map((x,i)=>i).filter(i=>!S.items[t][i].got)):[];
       const res=w.map((m,j)=>{const it=t<3?its[j]:-1;give(m.key,t,it,-1);return{name:m.key,tier:t,item:it}});
-      save();draw();show(res,false);
+      save();draw();reelRun(res.filter(r=>r.item>=0),()=>show(res,false));
     });
   };
   if(auto)launch();
