@@ -962,10 +962,11 @@ function goPk(){
   }
   const its=S.items[t].map((x,i)=>i).filter(i=>!S.items[t][i].got);
   // If all remaining prizes in this tier have the exact same name (1 single bundle), no need to race identical prizes unless user wants race excitement; still run the fun race so kids enjoy watching!
-  // 레이스 동안은 어떤 상품인지 모르게 '?' 구슬로 달리고, 도착한 뒤에 사진 릴로 랜덤 상품이 정해져요
-  run(its.map((i,k)=>({label:'❓'+(k+1),key:i})),n,ppl.join(', ').slice(0,26)+' · '+NM[t]+' 경품 결정 레이스!',w=>{
-    const pickIt=shuf(its).slice(0,Math.min(n,ppl.length));
-    const res=pickIt.map((it,j)=>{give(ppl[j],t,it,s);return{name:ppl[j],tier:t,item:it}});
+  // 구슬에는 경주하는 친구 이름이 적혀요. 도착하면 경품은 사진 릴로 랜덤 결정!
+  run(ppl.map(x=>({label:x,key:x})),n,ppl.join(', ').slice(0,26)+' · '+NM[t]+' 경품 레이스!',w=>{
+    const names=w.map(m=>m.key);
+    const pickIt=shuf(its).slice(0,names.length);
+    const res=pickIt.map((it,j)=>{give(names[j],t,it,s);return{name:names[j],tier:t,item:it}});
     save();draw();
     reelRun(res,()=>show(res,false));
   });
@@ -1132,33 +1133,33 @@ function toggleTest(){
 
 /* ===== 캡슐 현황 · 보충 계산 ===== */
 function capCalc(){
+  // 못 찾은 캡슐은 현장에 그대로 남아 있으니, 다음 부 숨길 개수 = 다음 부 배정 − 남아 있는 개수
   const r=[];
   for(let s=0;s<4;s++){
     const done=s<S.ses||T6.some(t=>used(s,t)>0||(S.capF[s][t]!==undefined&&S.capF[s][t]!==null));
     r[s]={done};
     T6.forEach(t=>{
       const base=+S.cap[s][t]||0;
+      const prev=(s>0&&r[s-1].done)?r[s-1][t].left:0;
+      const avail=Math.max(base,prev);
+      const hide=avail-prev;
       const ov=S.capF[s][t];
       const auto=ov===undefined||ov===''||ov===null;
       const found=done?(auto?used(s,t):+ov):0;
-      r[s][t]={base,found,short:done?Math.max(0,base-found):0,auto};
+      r[s][t]={base,prev,hide,found,left:done?Math.max(0,avail-found):0,miss:done?Math.max(0,base-found):0,auto};
     });
   }
   return r;
 }
 function capLbl(t){return `${CAP_COL[t][0]} ${CAP_COL[t][1]}(${NM[t]})`}
-function capList(s,r){
-  const a=T6.filter(t=>r[s][t].short>0).map(t=>`${capLbl(t)} ${r[s][t].short}개`);
-  return a;
-}
-function capLines(s,r){return T6.map(t=>`${capLbl(t)} +${r[s][t].short}개`).join('\n')}
 function capTxt(s,r){
-  return `⏰ ${SES[s]}부 추가 필요\n`+capLines(s,r);
+  return `⏰ ${SES[s]}부 숨길 캡슐\n`+T6.map(t=>`${capLbl(t)} ${r[s][t].hide}개`).join('\n')+`\n합계 ${T6.reduce((n,t)=>n+r[s][t].hide,0)}개`;
 }
 function capAll(r){
   const o=[];
-  for(let s=0;s<4;s++)if(r[s].done)o.push(capTxt(s,r));
-  return o.length?o.join('\n\n'):'(아직 끝난 부가 없어요)';
+  let nx=0;while(nx<3&&r[nx].done)nx++;
+  o.push(capTxt(nx,r));
+  return o.join('\n\n');
 }
 function capCopy(txt){
   const done=()=>msg('📋 복사했어요!\n카카오톡에 붙여넣기 하세요.');
@@ -1169,16 +1170,16 @@ let capSel=-1;
 function vCap(){
   const r=capCalc();
   window.__cr=r;
-  let h=`<div class="card mut">💡 <b>캡슐 보충 계산:</b> 부별 기준 개수에서 <b>못 찾은 만큼 '더 필요'</b>로 나와요(합산 안 함). '찾음'은 ①에서 당첨 처리한 수가 자동으로 들어가고, 직접 숫자를 넣으면 그 값이 우선돼요(비우면 자동).</div>`;
+  let h=`<div class="card mut">💡 <b>캡슐 보충 계산:</b> 못 찾은 캡슐은 현장에 남아 있으니, <b>다음 부 숨길 개수 = 다음 부 배정 − 남아 있는 개수</b>로 계산해요. '찾음'은 ①에서 당첨 처리한 수가 자동으로 들어가고, 직접 숫자를 넣으면 그 값이 우선돼요(비우면 자동).</div>`;
   h+=`<div class="card"><b>🧮 부별 기본 캡슐 수 (두루마리 색)</b><div style="overflow:auto"><table><tr><th>색깔·등수<th>${SES.map(x=>x+'부').join('<th>')}<th>합계 / 상품</tr>`+
     T6.map(t=>`<tr><td><b>${capLbl(t)}</b>`+[0,1,2,3].map(s=>`<td><input type="number" min="0" style="width:58px" value="${S.cap[s][t]}" onchange="S.cap[${s}][${t}]=+this.value;S.q[${s}][${t}]=+this.value;save();draw()">`).join('')+
     `<td>${[0,1,2,3].reduce((a,s)=>a+(+S.cap[s][t]||0),0)} / ${totCnt(t)}개</tr>`).join('')+`</table></div></div>`;
   for(let s=0;s<4;s++){
-    const tot=T6.reduce((a,t)=>a+r[s][t].base,0),sh=T6.reduce((a,t)=>a+r[s][t].short,0);
-    h+=`<div class="card"><div class="row" style="justify-content:space-between"><b>⏰ ${SES[s]}부 · 찾을 캡슐 ${tot}개${r[s].done?` · <span style="color:#e11d48">부족 ${sh}개</span>`:''}</b>
-      <button class="b sm gold" onclick="capCopy(capTxt(${s},window.__cr))">📋 ${SES[s]}부 부족분 복사</button></div>
-      <div style="overflow:auto"><table><tr><th>색깔·등수<th>기준<th>찾음<th>더 필요</tr>`+
-      T6.map(t=>{const c=r[s][t];return `<tr><td><b>${capLbl(t)}</b><td>${c.base}개<td><input type="number" min="0" style="width:58px" placeholder="${used(s,t)}" value="${c.auto?'':c.found}" onchange="S.capF[${s}][${t}]=this.value===''?undefined:+this.value;save();draw()"><td>${!r[s].done?'-':c.short>0?`<b style="color:#e11d48">+${c.short}개</b>`:'0'}</tr>`}).join('')+
+    const tot=T6.reduce((a,t)=>a+r[s][t].hide,0);
+    h+=`<div class="card"><div class="row" style="justify-content:space-between"><b>⏰ ${SES[s]}부 · 숨길 캡슐 ${tot}개</b>
+      <button class="b sm gold" onclick="capCopy(capTxt(${s},window.__cr))">📋 ${SES[s]}부 숨길 개수 복사</button></div>
+      <div style="overflow:auto"><table><tr><th>색깔·등수<th>배정<th>앞 부 남음<th>숨길 개수<th>찾음<th>못 찾음(남음)</tr>`+
+      T6.map(t=>{const c=r[s][t];return `<tr><td><b>${capLbl(t)}</b><td>${c.base}개<td>${s>0&&r[s-1].done?c.prev+'개':'-'}<td><b style="color:#e11d48">${c.hide}개</b><td><input type="number" min="0" style="width:58px" placeholder="${used(s,t)}" value="${c.auto?'':c.found}" onchange="S.capF[${s}][${t}]=this.value===''?undefined:+this.value;save();draw()"><td>${!r[s].done?'-':c.left+'개'}</tr>`}).join('')+
       `</table></div></div>`;
   }
   const all=capAll(r);
