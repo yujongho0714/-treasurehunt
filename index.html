@@ -1203,7 +1203,7 @@ function norm(){
   if((!S.roster||!S.roster.length)&&!S.rosterSet){S.roster=ROSTER_DEF.slice()}
   for(let s=0;s<4;s++){if(!S.q[s]||!T6.some(t=>+S.q[s][t]>0)){const nothing=!S.log.some(l=>l.ses==s);if(nothing)S.q[s]=Object.assign({},S.cap[s])}}
   if(JSON.stringify(S.cap)===CAP_OLD)S.cap=JSON.parse(JSON.stringify(CAP_DEF));
-  S.timg=S.timg||{};S.roster=S.roster||[];S.fr=S.fr||[];S.bun=S.bun||[];
+  S.timg=S.timg||{};S.annImg=S.annImg||{};S.roster=S.roster||[];S.fr=S.fr||[];S.bun=S.bun||[];
   // 기본 경품 사진 자동 적용 (아직 손대지 않은 등수만)
   [1,2].forEach(t=>{
     const a=S.items&&S.items[t];
@@ -1364,19 +1364,189 @@ function vCap(){
   return h;
 }
 
+/* ===================================================================
+   ⑥ 공지 이미지 (1등/2등 개별, 3~6등·참가상 명단) + ZIP 다운로드
+   =================================================================== */
+const ANN_NM={3:'레크레이션 쿠폰',4:'빵부장',5:'치즈맛콘',6:'코코넛칩',0:'마이쮸 2개'};
+const ANN_EMO={3:'🎟️',4:'🍞',5:'🍦',6:'🥥',0:'🍬'};
+const ANN_COL={1:['#ff9900','#ff4d00'],2:['#7c3aed','#06b6d4'],3:['#f59e0b','#ef4444'],4:['#10b981','#047857'],5:['#3b82f6','#1d4ed8'],6:['#ec4899','#be185d'],0:['#a855f7','#6c4cff']};
+const ANN_FONT="'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif";
+const annDate=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const annImgSrc=k=>(S.annImg&&S.annImg[k])||(k>=4?S.timg[k]:'')||'';
+const annWinners=t=>S.log.filter(l=>!l.ret&&l.tier==t);
+const annNames=t=>[...new Set(annWinners(t).map(l=>l.name))].sort(ko);
+const annNone=()=>allNames().filter(n=>!S.log.some(l=>!l.ret&&l.name==n)).sort(ko);
+
+function annLoad(src){return new Promise(ok=>{if(!src)return ok(null);const i=new Image();i.onload=()=>ok(i);i.onerror=()=>ok(null);i.src=src})}
+function annRR(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath()}
+function annText(g,t,x,y,maxW,size,weight,color,stroke){
+  let s=size;g.textAlign='center';g.textBaseline='middle';
+  do{g.font=weight+' '+s+'px '+ANN_FONT;s-=2}while(g.measureText(t).width>maxW&&s>14);
+  if(stroke){g.lineWidth=stroke[1];g.strokeStyle=stroke[0];g.lineJoin='round';g.strokeText(t,x,y)}
+  g.fillStyle=color;g.fillText(t,x,y);
+}
+function annBg(g,W,H,k){
+  const c=ANN_COL[k],gr=g.createLinearGradient(0,0,W,H);
+  gr.addColorStop(0,c[0]);gr.addColorStop(1,c[1]);g.fillStyle=gr;g.fillRect(0,0,W,H);
+  g.fillStyle='rgba(255,255,255,.12)';
+  for(let i=0;i<26;i++){g.beginPath();g.arc((i*197)%W,(i*311)%H,10+(i*7)%30,0,7);g.fill()}
+}
+function annFooter(g,W,H){annText(g,'용인대 정도 태권도 2관 · 보물찾기 경품 레이스',W/2,H-46,W-80,30,'800','rgba(255,255,255,.92)')}
+function annPic(g,img,emo,x,y,s){
+  g.save();annRR(g,x-12,y-12,s+24,s+24,40);g.fillStyle='#fff';g.fill();
+  annRR(g,x,y,s,s,30);g.clip();
+  if(img){const k=Math.max(s/img.width,s/img.height),w=img.width*k,h=img.height*k;g.drawImage(img,x+(s-w)/2,y+(s-h)/2,w,h)}
+  else{const gr=g.createRadialGradient(x+s/2,y+s/2,10,x+s/2,y+s/2,s/1.4);gr.addColorStop(0,'#fff8d6');gr.addColorStop(1,'#ffd36b');g.fillStyle=gr;g.fillRect(x,y,s,s);
+    g.font=Math.round(s*.55)+'px '+ANN_FONT;g.textAlign='center';g.textBaseline='middle';g.fillText(emo,x+s/2,y+s/2+8)}
+  g.restore();
+}
+const annBlob=c=>new Promise(ok=>c.toBlob(ok,'image/png'));
+
+/* 1·2등: 당첨자 한 명당 한 장 */
+async function annWinnerCard(t,l){
+  const it=S.items[t]&&S.items[t][l.item];
+  const pn=(it&&it.n)||l.pName||(NM[t]+' 상품');
+  let img=await annLoad((it&&it.img)||l.pImg||'');
+  if(!img)img=await annLoad('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(prizeArt(t,pn,Math.max(0,l.item))));
+  const W=1080,H=1350,c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
+  annBg(g,W,H,t);
+  annText(g,(t==1?'👑 ':'💎 ')+NM[t]+' 당첨 축하합니다!',W/2,105,W-80,78,'900','#fff',['rgba(0,0,0,.35)',10]);
+  annPic(g,img,'🎁',W/2-290,190,580);
+  annRR(g,70,830,W-140,150,36);g.fillStyle='rgba(0,0,0,.38)';g.fill();
+  annText(g,'받은 상품',W/2,870,W-200,34,'800','#ffe66b');
+  annText(g,'🎁 '+pn,W/2,935,W-200,62,'900','#fff');
+  annRR(g,70,1015,W-140,190,36);g.fillStyle='#fff';g.fill();
+  annText(g,'🎉 '+l.name+' 🎉',W/2,1110,W-200,104,'900',ANN_COL[t][1]);
+  annFooter(g,W,H);
+  return annBlob(c);
+}
+
+/* 3~6등·참가상: 위에 상품, 아래 박스에 명단 */
+async function annListCard(k,names){
+  const W=1080,cols=names.length<=6?2:names.length<=24?3:4,fs=cols==2?52:cols==3?44:38,rh=fs+40;
+  const rows=Math.max(1,Math.ceil(names.length/cols));
+  const top=k==3?520:880,boxH=130+rows*rh+40,H=top+boxH+150;
+  const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
+  annBg(g,W,H,k);
+  const head=k==0?'🍬 참가상 (상품 없는 친구들)':TIER_META[k].icon+' '+NM[k]+' 당첨 축하합니다!';
+  annText(g,head,W/2,95,W-80,70,'900','#fff',['rgba(0,0,0,.35)',10]);
+  if(k==3){
+    // 큰 쿠폰
+    const x=70,y=180,w=W-140,h=280;
+    g.save();annRR(g,x,y,w,h,36);g.fillStyle='#fff7d6';g.fill();
+    g.setLineDash([22,14]);g.lineWidth=8;g.strokeStyle='#ef4444';annRR(g,x+22,y+22,w-44,h-44,26);g.stroke();g.restore();
+    g.fillStyle=ANN_COL[3][1];[[x,y+h/2],[x+w,y+h/2]].forEach(p=>{g.beginPath();g.arc(p[0],p[1],34,0,7);g.fill()});
+    annText(g,'🎟️ 레크레이션 쿠폰',W/2,y+h/2-10,w-140,104,'900','#c2410c');
+    annText(g,'RECREATION COUPON',W/2,y+h-62,w-160,34,'800','#f59e0b');
+  }else{
+    const img=await annLoad(annImgSrc(k));
+    annPic(g,img,ANN_EMO[k],W/2-260,175,520);
+    annRR(g,170,735,W-340,100,50);g.fillStyle='rgba(0,0,0,.38)';g.fill();
+    annText(g,'🎁 '+ANN_NM[k],W/2,786,W-380,62,'900','#fff');
+  }
+  annRR(g,60,top,W-120,boxH,40);g.fillStyle='#fff';g.fill();
+  g.lineWidth=8;g.strokeStyle=ANN_COL[k][0];g.stroke();
+  annText(g,'📋 '+(k==0?'참가상':NM[k]+' 당첨')+' 명단 · '+names.length+'명',W/2,top+66,W-200,48,'900',ANN_COL[k][1]);
+  g.fillStyle=ANN_COL[k][0];g.fillRect(110,top+108,W-220,4);
+  const cw=(W-180)/cols;
+  if(!names.length)annText(g,'(명단 없음)',W/2,top+130+rh/2,W-200,fs,'800','#999');
+  names.forEach((n,i)=>{const r=Math.floor(i/cols),cl=i%cols;
+    annText(g,n,90+cw*cl+cw/2,top+130+r*rh+rh/2,cw-20,fs,'800','#1e1b2e')});
+  annFooter(g,W,H);
+  return annBlob(c);
+}
+
+/* 간단한 ZIP 만들기 (무압축) */
+const ANN_CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function annCrc(d){let c=0xFFFFFFFF;for(let i=0;i<d.length;i++)c=ANN_CRC[(c^d[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+async function annZip(files){
+  const enc=new TextEncoder(),parts=[],cen=[];let off=0;
+  for(const f of files){
+    const data=new Uint8Array(await f.blob.arrayBuffer()),nm=enc.encode(f.name),crc=annCrc(data);
+    const h=new DataView(new ArrayBuffer(30));
+    h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(8,0,true);
+    h.setUint32(14,crc,true);h.setUint32(18,data.length,true);h.setUint32(22,data.length,true);h.setUint16(26,nm.length,true);
+    parts.push(h.buffer,nm,data);
+    const cd=new DataView(new ArrayBuffer(46));
+    cd.setUint32(0,0x02014b50,true);cd.setUint16(4,20,true);cd.setUint16(6,20,true);cd.setUint16(8,0x0800,true);
+    cd.setUint32(16,crc,true);cd.setUint32(20,data.length,true);cd.setUint32(24,data.length,true);cd.setUint16(28,nm.length,true);cd.setUint32(42,off,true);
+    cen.push(cd.buffer,nm);
+    off+=30+nm.length+data.length;
+  }
+  const csz=cen.reduce((a,b)=>a+(b.byteLength||b.length),0),e=new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,csz,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...cen,e.buffer],{type:'application/zip'});
+}
+function annSave(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+
+/* 이미지 목록 만들기 */
+async function annBuild(group){
+  const d=annDate(),out=[];
+  if(group==1||group==2){
+    const t=group,ws=annWinners(t).slice().sort((a,b)=>ko(a.name,b.name));
+    for(let i=0;i<ws.length;i++)out.push({name:`tier${t}_${d}/tier${t}_${String(i+1).padStart(2,'0')}.png`,label:ws[i].name,blob:await annWinnerCard(t,ws[i])});
+  }else{
+    for(const t of [3,4,5,6])out.push({name:`tier3to6_${d}/tier${t}_list.png`,label:NM[t]+' 명단 ('+annNames(t).length+'명)',blob:await annListCard(t,annNames(t))});
+    out.push({name:`tier3to6_${d}/participation_list.png`,label:'참가상 마이쮸 명단 ('+annNone().length+'명)',blob:await annListCard(0,annNone())});
+  }
+  return out;
+}
+async function annZipDl(group){
+  if(group<3&&!annWinners(group).length)return msg(NM[group]+' 당첨 기록이 아직 없어요');
+  msg('🖼 이미지를 만드는 중이에요... 잠시만요!');
+  const files=await annBuild(group);
+  annSave(await annZip(files),(group<3?'tier'+group:'tier3to6')+'_'+annDate()+'.zip');
+  $('dlg-ov').style.display='none';
+}
+async function annPreview(){
+  const box=$('ann-prev');if(!box)return;
+  box.innerHTML='<p class="mut">🖼 미리보기를 만드는 중...</p>';
+  window.__ann=[];
+  for(const gr of [1,2,3]){const f=await annBuild(gr);window.__ann.push(...f)}
+  if(!$('ann-prev'))return;
+  $('ann-prev').innerHTML=window.__ann.map((f,i)=>{const u=URL.createObjectURL(f.blob);
+    return `<div class="it"><img src="${u}" style="aspect-ratio:auto;object-fit:contain;background:#fff"><div>${e(f.label)}</div>
+    <button class="b sm" style="margin-top:4px" onclick="annSave(window.__ann[${i}].blob,window.__ann[${i}].name.split('/').pop())">💾 저장</button></div>`}).join('')||'<p class="mut">만들 이미지가 없어요</p>';
+}
+function annPicUp(f,k){
+  if(!f)return;
+  const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{
+    const c=document.createElement('canvas'),s=Math.min(1,900/Math.max(im.width,im.height));
+    c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+    S.annImg=S.annImg||{};S.annImg[k]=c.toDataURL('image/jpeg',.85);save();draw()};im.src=r.result};r.readAsDataURL(f);
+}
+function vAnn(){
+  setTimeout(annPreview,50);
+  const row=k=>{const src=annImgSrc(k);return `<div class="bundle-row">
+    ${src?`<img class="t" src="${src}">`:`<span class="t" style="display:inline-flex;align-items:center;justify-content:center;font-size:28px">${ANN_EMO[k]}</span>`}
+    <b style="min-width:150px">${k?NM[k]:'참가상'} · ${ANN_NM[k]}</b>
+    <label class="b sm">🖼 사진 바꾸기<input type="file" hidden accept="image/*" onchange="annPicUp(this.files[0],${k})"></label>
+    ${S.annImg&&S.annImg[k]?`<button class="b sm" onclick="delete S.annImg[${k}];save();draw()">기본으로</button>`:''}
+  </div>`};
+  return `<div class="card mut">📢 <b>공지 이미지 만들기:</b> 1등·2등은 당첨자 한 명마다 받은 상품이 적힌 이미지가, 3~6등과 참가상(마이쮸 2개)은 상품 그림 아래 박스에 명단이 적힌 이미지가 만들어져요. ZIP을 풀면 바로 단톡방·밴드에 올릴 수 있어요.</div>
+  <div class="card"><b>📦 ZIP 파일 받기</b><div class="row" style="margin-top:8px">
+    <button class="b gold" onclick="annZipDl(1)">👑 1등 당첨 ZIP (${annWinners(1).length}장)</button>
+    <button class="b gold" onclick="annZipDl(2)">💎 2등 당첨 ZIP (${annWinners(2).length}장)</button>
+    <button class="b gold" onclick="annZipDl(3)">🎁 3~6등 + 참가상 ZIP (5장)</button>
+  </div><p class="mut">파일 이름은 폰에서 깨지지 않게 영어+날짜로 저장돼요 (예: tier1_${annDate()}/tier1_01.png). 1·2등은 이름 가나다순 번호예요.</p></div>
+  <div class="card"><b>🖼 상품 그림 (사진이 없으면 그림 아이콘으로 나와요)</b>${row(4)}${row(5)}${row(6)}${row(0)}</div>
+  <div class="card"><div class="row" style="justify-content:space-between"><b>👀 미리보기 · 한 장씩 저장</b><button class="b sm" onclick="annPreview()">🔄 다시 만들기</button></div><div class="grid" id="ann-prev"></div></div>`;
+}
+
 function draw(){
   $('tabs').innerHTML=[
     ['ses','① 진행'],
     ['unc','② 미당첨 룰렛'],
     ['rec','③ 기록·남은 수량'],
     ['prz','④ 상품 등록'],
-    ['cap','⑤ 캡슐 보충']
+    ['cap','⑤ 캡슐 보충'],
+    ['ann','⑥ 공지 이미지']
   ].map(a=>`<button class="b ${tab==a[0]?'on':''}" onclick="tab='${a[0]}';draw()">${a[1]}</button>`).join('')+
   `<button class="b ${test?'go':''}" onclick="toggleTest()">🧪 테스트 ${test?'끄기':'모드'}</button>`+
   `<button class="b gold" onclick="demo()">▶ 시연</button>`+
   `<span class="mut">${test?'🧪 테스트 중(저장 안 됨)':stamp}</span>`;
 
-  $('main').innerHTML=(test?'<div class="card" style="border-color:#e11d48;background:rgba(225,29,72,.08)"><b>🧪 테스트 모드 실행 중</b> · 여기서 테스트한 내용은 실제 기록에 덮어쓰지 않아요. 연습이 끝나면 [🧪 테스트 끄기]를 눌러 주세요.</div>':'')+{ses:vSes,unc:vUnc,rec:vRec,prz:vPrz,cap:vCap}[tab]();
+  $('main').innerHTML=(test?'<div class="card" style="border-color:#e11d48;background:rgba(225,29,72,.08)"><b>🧪 테스트 모드 실행 중</b> · 여기서 테스트한 내용은 실제 기록에 덮어쓰지 않아요. 연습이 끝나면 [🧪 테스트 끄기]를 눌러 주세요.</div>':'')+{ses:vSes,unc:vUnc,rec:vRec,prz:vPrz,cap:vCap,ann:vAnn}[tab]();
 }
 
 function vSes(){
