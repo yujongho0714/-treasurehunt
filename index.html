@@ -916,7 +916,6 @@ function delFr(i){
 const leftQ=t=>(S.q[S.ses][t]||0)-used(S.ses,t);
 
 function openPk(t){
-  if(leftQ(t)<=0)return msg('이번 부에 입력한 '+NM[t]+' 수량이 없어요.\n위 표에서 이번 부 수량을 먼저 늘려 주세요!');
   if(rem(t)<=0)return msg(NM[t]+' 상품은 모두 품절이에요!');
   if(!allNames().length)return msg('먼저 ④ 상품 등록 탭에서 수련생 이름 txt 파일을 올려 주세요\n(또는 놀러 온 친구를 추가해 주세요!)');
   pk={t,sel:[],su:''};drawPk();
@@ -935,7 +934,7 @@ function drawPk(){
   $('pk').innerHTML=`<div class="card">
     <div class="row" style="justify-content:space-between">
       <b>${meta.icon} ${NM[t]} 보물을 찾은 친구 고르기</b>
-      <span class="mut">(이번 부 ${leftQ(t)}개 남음)</span>
+      <span class="mut">(${leftQ(t)>0?'이번 부 '+leftQ(t)+'개 남음':'이번 부 설정 수량 소진 · 초과해도 진행 가능'} · 전체 ${rem(t)}개)</span>
     </div>
     <p class="mut">① 성씨를 누르고 ② 이름에 체크하고 ③ 시작을 눌러요. 체크한 사람 수만큼 당첨돼요.</p>
     <div class="row">${su.map(x=>`<button class="b ${x==pk.su?'on':''}" data-s="${e(x)}" onclick="pk.su=this.dataset.s;drawPk()">${e(x)}</button>`).join('')}</div>
@@ -951,9 +950,9 @@ function drawPk(){
 function goPk(){
   const t=pk.t,s=S.ses,n=pk.sel.length;
   if(!n)return msg('찾은 친구를 한 명 이상 체크해 주세요');
-  if(n>leftQ(t))return msg('이번 부 '+NM[t]+' 수량은 '+leftQ(t)+'개인데 '+n+'명을 골랐어요');
   if(n>rem(t))return msg(NM[t]+' 남은 상품이 '+rem(t)+'개예요');
   const ppl=shuf(pk.sel);
+  if(n>leftQ(t)){S.q[s][t]=used(s,t)+n}
   $('pk').style.display='none';pk=null;
   if(t>2){
     ppl.forEach(p=>give(p,t,-1,s));
