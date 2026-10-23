@@ -1421,6 +1421,46 @@ async function annWinnerCard(t,l){
   return annBlob(c);
 }
 
+/* 1·2등: 4명씩 2×2 콜라주 */
+async function annCollage(t,ls,page,pages){
+  const W=1080,H=1350,c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
+  annBg(g,W,H,t);
+  annText(g,(t==1?'👑 ':'💎 ')+NM[t]+' 당첨 축하합니다!'+(pages>1?` (${page}/${pages})`:''),W/2,80,W-80,68,'900','#fff',['rgba(0,0,0,.35)',10]);
+  const gap=26,cw=(W-60*2-gap)/2,ch=(H-150-100-gap)/2;
+  for(let i=0;i<ls.length;i++){
+    const l=ls[i],it=S.items[t]&&S.items[t][l.item],pn=(it&&it.n)||l.pName||(NM[t]+' 상품');
+    let img=await annLoad((it&&it.img)||l.pImg||'');
+    if(!img)img=await annLoad('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(prizeArt(t,pn,Math.max(0,l.item))));
+    const x=60+(i%2)*(cw+gap),y=150+Math.floor(i/2)*(ch+gap);
+    annRR(g,x,y,cw,ch,32);g.fillStyle='#fff';g.fill();
+    const ps=ch-160,px=x+(cw-ps)/2,py=y+18;
+    g.save();annRR(g,px,py,ps,ps,22);g.clip();
+    if(img){const k=Math.max(ps/img.width,ps/img.height),w=img.width*k,h=img.height*k;g.drawImage(img,px+(ps-w)/2,py+(ps-h)/2,w,h)}
+    g.restore();
+    annText(g,'🎁 '+pn,x+cw/2,py+ps+36,cw-40,36,'800','#555');
+    annText(g,l.name,x+cw/2,py+ps+98,cw-40,64,'900',ANN_COL[t][1]);
+  }
+  annFooter(g,W,H);
+  return annBlob(c);
+}
+/* 텍스트 명단 */
+function annTextSecs(){
+  const d=new Date(),md=(d.getMonth()+1)+'/'+d.getDate(),secs=[];
+  for(const t of [1,2]){const ws=annWinners(t).slice().sort((a,b)=>ko(a.name,b.name));
+    secs.push({k:t,title:(t==1?'👑 ':'💎 ')+NM[t]+' 당첨 ('+ws.length+'명)',
+      body:ws.map(l=>{const it=S.items[t]&&S.items[t][l.item];return '- '+l.name+' : '+((it&&it.n)||l.pName||(NM[t]+' 상품'))}).join('\n')||'(없음)'})}
+  for(const t of [3,4,5,6]){const ns=annNames(t);secs.push({k:t,title:TIER_META[t].icon+' '+NM[t]+' '+ANN_NM[t]+' ('+ns.length+'명)',body:ns.join(', ')||'(없음)'})}
+  const nn=annNone();secs.push({k:0,title:'🍬 참가상 마이쮸 2개 ('+nn.length+'명)',body:nn.join(', ')||'(없음)'});
+  secs.forEach(s=>s.text=s.title+'\n'+s.body);
+  return {head:'🎉 보물찾기 경품 레이스 당첨자 명단 ('+md+')\n용인대 정도 태권도 2관',secs};
+}
+function annCopy(txt){
+  const fb=()=>{const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy')}catch(_){}ta.remove()};
+  (navigator.clipboard?navigator.clipboard.writeText(txt).catch(fb):Promise.resolve(fb())).then(()=>msg('📋 복사했어요! 단톡방에 붙여넣기 하세요'));
+}
+function annCopyAll(){const r=annTextSecs();annCopy(r.head+'\n\n'+r.secs.map(s=>s.text).join('\n\n'))}
+function annCopySec(i){annCopy(annTextSecs().secs[i].text)}
+
 /* 3~6등·참가상: 위에 상품, 아래 박스에 명단 */
 async function annListCard(k,names){
   const W=1080,cols=names.length<=6?2:names.length<=24?3:4,fs=cols==2?52:cols==3?44:38,rh=fs+40;
@@ -1483,8 +1523,8 @@ function annSave(blob,name){const a=document.createElement('a');a.href=URL.creat
 async function annBuild(group){
   const d=annDate(),out=[];
   if(group==1||group==2){
-    const t=group,ws=annWinners(t).slice().sort((a,b)=>ko(a.name,b.name));
-    for(let i=0;i<ws.length;i++)out.push({name:`tier${t}_${d}/tier${t}_${String(i+1).padStart(2,'0')}.png`,label:ws[i].name,blob:await annWinnerCard(t,ws[i])});
+    const t=group,ws=annWinners(t).slice().sort((a,b)=>ko(a.name,b.name)),pg=Math.ceil(ws.length/4);
+    for(let i=0;i<pg;i++){const ch=ws.slice(i*4,i*4+4);out.push({name:`tier${t}_${d}/tier${t}_${String(i+1).padStart(2,'0')}.png`,label:NM[t]+' '+(i+1)+'/'+pg+' · '+ch.map(l=>l.name).join(', '),blob:await annCollage(t,ch,i+1,pg)})}
   }else{
     for(const t of [3,4,5,6])out.push({name:`tier3to6_${d}/tier${t}_list.png`,label:NM[t]+' 명단 ('+annNames(t).length+'명)',blob:await annListCard(t,annNames(t))});
     out.push({name:`tier3to6_${d}/participation_list.png`,label:'참가상 마이쮸 명단 ('+annNone().length+'명)',blob:await annListCard(0,annNone())});
@@ -1523,12 +1563,15 @@ function vAnn(){
     <label class="b sm">🖼 사진 바꾸기<input type="file" hidden accept="image/*" onchange="annPicUp(this.files[0],${k})"></label>
     ${S.annImg&&S.annImg[k]?`<button class="b sm" onclick="delete S.annImg[${k}];save();draw()">기본으로</button>`:''}
   </div>`};
-  return `<div class="card mut">📢 <b>공지 이미지 만들기:</b> 1등·2등은 당첨자 한 명마다 받은 상품이 적힌 이미지가, 3~6등과 참가상(마이쮸 2개)은 상품 그림 아래 박스에 명단이 적힌 이미지가 만들어져요. ZIP을 풀면 바로 단톡방·밴드에 올릴 수 있어요.</div>
+  return `<div class="card mut">📢 <b>공지 이미지 만들기:</b> 1등·2등은 4명씩 한 장에 사진·상품·이름이 들어간 콜라주 이미지가, 3~6등과 참가상(마이쮸 2개)은 상품 그림 아래 박스에 명단이 적힌 이미지가 만들어져요. ZIP을 풀면 바로 단톡방·밴드에 올릴 수 있어요.</div>
   <div class="card"><b>📦 ZIP 파일 받기</b><div class="row" style="margin-top:8px">
-    <button class="b gold" onclick="annZipDl(1)">👑 1등 당첨 ZIP (${annWinners(1).length}장)</button>
-    <button class="b gold" onclick="annZipDl(2)">💎 2등 당첨 ZIP (${annWinners(2).length}장)</button>
+    <button class="b gold" onclick="annZipDl(1)">👑 1등 당첨 ZIP (${Math.ceil(annWinners(1).length/4)}장)</button>
+    <button class="b gold" onclick="annZipDl(2)">💎 2등 당첨 ZIP (${Math.ceil(annWinners(2).length/4)}장)</button>
     <button class="b gold" onclick="annZipDl(3)">🎁 3~6등 + 참가상 ZIP (5장)</button>
-  </div><p class="mut">파일 이름은 폰에서 깨지지 않게 영어+날짜로 저장돼요 (예: tier1_${annDate()}/tier1_01.png). 1·2등은 이름 가나다순 번호예요.</p></div>
+  </div><p class="mut">파일 이름은 폰에서 깨지지 않게 영어+날짜로 저장돼요 (예: tier1_${annDate()}/tier1_01.png). 1·2등은 4명씩 한 장(2×2 콜라주), 이름 가나다순이에요.</p></div>
+  ${(()=>{const r=annTextSecs();return `<div class="card"><div class="row" style="justify-content:space-between"><b>📋 텍스트 명단 복사</b><button class="b gold" onclick="annCopyAll()">📋 전체 복사</button></div>
+  <textarea readonly onclick="this.select()" style="width:100%;height:220px;margin-top:8px;font-size:14px;line-height:1.5;border-radius:10px;padding:10px;box-sizing:border-box">${e(r.head+'\n\n'+r.secs.map(s=>s.text).join('\n\n'))}</textarea>
+  <div class="row" style="margin-top:8px;flex-wrap:wrap">${r.secs.map((s,i)=>`<button class="b sm" onclick="annCopySec(${i})">${s.k?NM[s.k]:'참가상'}만 복사</button>`).join('')}</div></div>`})()}
   <div class="card"><b>🖼 상품 그림 (사진이 없으면 그림 아이콘으로 나와요)</b>${row(4)}${row(5)}${row(6)}${row(0)}</div>
   <div class="card"><div class="row" style="justify-content:space-between"><b>👀 미리보기 · 한 장씩 저장</b><button class="b sm" onclick="annPreview()">🔄 다시 만들기</button></div><div class="grid" id="ann-prev"></div></div>`;
 }
